@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Расчёт топлива</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one narrow column. Summer and winter consumption side by side on top, one waybill table below where every row carries its own sun or snowflake, litres total as the single bold block. */
+:root {
+  --bg: #EFF2EE;
+  --surface: #FFFFFF;
+  --ink: #14201A;
+  --muted: #5A6A62;
+  --line: #D3DAD4;
+  --accent: #0B5F57;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #DDEBE7;
+  --danger: #A63A2B;
+  --sun: #B26A00;
+  --sun-soft: #F6E7CC;
+  --snow: #2563A8;
+  --snow-soft: #DCE8F6;
+  --font-body: 'Golos Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-num: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color-scheme: light;
+  padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1411;
+    --surface: #161F1A;
+    --ink: #E4ECE7;
+    --muted: #92A399;
+    --line: #27342C;
+    --accent: #5FCDBD;
+    --accent-ink: #06211D;
+    --accent-soft: #183029;
+    --danger: #E58A7B;
+    --sun: #F0B54F;
+    --sun-soft: #3A2D14;
+    --snow: #86BBF2;
+    --snow-soft: #172B42;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1411;
+  --surface: #161F1A;
+  --ink: #E4ECE7;
+  --muted: #92A399;
+  --line: #27342C;
+  --accent: #5FCDBD;
+  --accent-ink: #06211D;
+  --accent-soft: #183029;
+  --danger: #E58A7B;
+  --sun: #F0B54F;
+  --sun-soft: #3A2D14;
+  --snow: #86BBF2;
+  --snow-soft: #172B42;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  padding-block: 20px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 30rem; margin-inline: auto; display: grid; gap: 16px; }
+h1 { margin: 0; font-size: 1.375rem; line-height: 1.2; font-weight: 700; text-wrap: balance; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: .9375rem; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.label { display: block; font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+.ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ico.sun { color: var(--sun); }
+.ico.snow { color: var(--snow); }
+
+.field {
+  width: 100%; min-width: 0;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-num); font-size: 1rem; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.field::placeholder { color: var(--muted); opacity: .75; }
+.field:focus-visible, .btn:focus-visible, .chip button:focus-visible, .del:focus-visible, .sea:focus-visible, .xsel:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.field:focus-visible { border-color: var(--accent); }
+
+.xhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.unit { color: var(--muted); font-size: .8125rem; white-space: nowrap; }
+.xcells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto auto; gap: 8px 10px; margin-top: 10px; }
+/* Both cells share the same two rows, so the names and the inputs line up even when a name wraps. */
+.xcell { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 8px; align-content: start; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.xcell.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.xcell.on .field { background: var(--surface); }
+.xsel { display: flex; align-items: flex-start; gap: 6px; width: 100%; padding: 2px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: .875rem; font-weight: 600; cursor: pointer; text-align: left; }
+.xsel .ico { margin-top: 1px; }
+.xtxt { display: grid; gap: 2px; min-width: 0; }
+.xname { line-height: 1.2; }
+.xnow { font-size: .6875rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); line-height: 1; }
+.xcell:not(.on) .xnow { visibility: hidden; }
+.xin { padding: 6px 10px; font-size: 1.5rem; font-weight: 700; }
+.xcap { margin: 10px 0 0; font-size: .8125rem; color: var(--muted); }
+.hint { margin: 8px 0 0; font-size: .8125rem; color: var(--danger); }
+
+.web { display: grid; gap: 10px; margin-top: 14px; }
+.wtog {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 5px 12px 5px 9px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink);
+  font: inherit; font-size: .875rem; font-weight: 600; line-height: 1.3; cursor: pointer;
+}
+.wtog .ico { width: 16px; height: 16px; color: var(--muted); }
+.wtog:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wtog[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.wtog[aria-pressed="true"] .ico { color: var(--accent-ink); }
+.wbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.wf { display: grid; gap: 4px; min-width: 0; font-size: .75rem; font-weight: 600; color: var(--muted); }
+.wf .field { padding: 8px 10px; font-size: 1.125rem; font-weight: 700; }
+.wsum { grid-column: 1 / -1; margin: 0; font-size: .875rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+#whint { margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chips-empty { margin: 0; font-size: .875rem; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); overflow: hidden; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); }
+.chip button { font: inherit; color: var(--ink); background: none; border: 0; cursor: pointer; }
+.chip .pick { font-size: .875rem; padding: 7px 6px 7px 12px; }
+.chip .pick b { font-family: var(--font-num); font-weight: 500; color: var(--muted); margin-left: 6px; }
+.chip .rm { color: var(--muted); padding: 7px 11px 7px 4px; font-size: 1rem; line-height: 1; }
+.chip .rm:hover { color: var(--danger); }
+
+.save { display: flex; gap: 8px; margin-top: 14px; }
+.save .field { flex: 1; font-family: var(--font-body); font-weight: 400; }
+
+.btn {
+  font: inherit; font-size: .875rem; font-weight: 600;
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: var(--accent-soft); }
+
+.note {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  padding: 8px 8px 8px 12px; margin-bottom: 14px; border-radius: 8px;
+  background: var(--accent-soft); font-size: .875rem;
+}
+.note .btn { padding: 6px 10px; }
+
+.cols, .row {
+  display: grid; gap: 6px; align-items: center;
+  grid-template-columns: 34px minmax(0, 1.45fr) minmax(0, 1.45fr) minmax(0, 1.1fr) 28px;
+}
+.cols { align-items: end; margin-bottom: 8px; font-size: .75rem; font-weight: 600; color: var(--muted); line-height: 1.2; }
+/* A row has two lines: the inputs, then the distance and litres they give. */
+.row { grid-template-areas: "sea a b y del" ". res res res ."; row-gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.row:last-child { padding-bottom: 0; border-bottom: 0; }
+.row.empty { row-gap: 0; }
+.row.empty .res { display: none; }
+.row > .sea { grid-area: sea; }
+.row > .y { grid-area: y; }
+.row > .a { grid-area: a; }
+.row > .b { grid-area: b; }
+.row > .del { grid-area: del; }
+.row > .res { grid-area: res; }
+#rows { display: flex; flex-direction: column; gap: 10px; }
+.row .field { padding: 9px 6px; font-size: .9375rem; }
+.sea { display: grid; place-items: center; width: 34px; height: 36px; padding: 0; border: 0; border-radius: 8px; cursor: pointer; }
+.sea.summer { color: var(--sun); background: var(--sun-soft); }
+.sea.winter { color: var(--snow); background: var(--snow-soft); }
+.res { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.dist { min-width: 0; padding-top: 2px; font-size: .8125rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dist.bad { color: var(--danger); }
+.resr { margin-left: auto; text-align: right; min-width: 0; line-height: 1.2; }
+.m { display: block; font-family: var(--font-num); font-weight: 700; font-size: 1.0625rem; color: var(--accent); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.z { display: block; margin-top: 2px; font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.z.bad { color: var(--danger); }
+.del { width: 28px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.del:hover { color: var(--danger); background: var(--accent-soft); }
+.del.armed, .del.armed:hover { color: var(--bg); background: var(--danger); }
+.row.empty .del { visibility: hidden; }
+
+.actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+.totals { background: var(--accent); color: var(--accent-ink); border-radius: 10px; padding: 18px 16px; }
+.totals .label { color: inherit; opacity: .8; }
+.big {
+  display: flex; align-items: baseline; gap: 8px; margin-top: 6px;
+  font-family: var(--font-num); font-weight: 700; font-size: clamp(2.25rem, 12vw, 3rem); line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.big span { font-size: 1.25rem; font-weight: 500; opacity: .85; }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 12px; margin: 16px 0 0; padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent);
+}
+.stats dt { font-size: .75rem; opacity: .8; }
+.stats dd { margin: 2px 0 0; font-family: var(--font-num); font-weight: 600; font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+.split { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent); }
+.split div { display: flex; align-items: center; gap: 8px; font-size: .875rem; }
+.split .ico { color: inherit; }
+.split .sv { margin-left: auto; font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+.foot { margin: 0; font-size: .8125rem; color: var(--muted); }
+
+@media (max-width: 340px) {
+  .z { font-size: .625rem; }
+  .m { font-size: 1rem; }
+  .row .field { padding-inline: 4px; font-size: .75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-sun" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+  </symbol>
+  <symbol id="i-snow" viewBox="0 0 24 24">
+    <path d="M12 2v20M9 4.6l3 3 3-3M9 19.4l3-3 3 3"/>
+    <g transform="rotate(60 12 12)"><path d="M12 2v20M9 4.6l3 3 3-3M9 19.4l3-3 3 3"/></g>
+    <g transform="rotate(120 12 12)"><path d="M12 2v20M9 4.6l3 3 3-3M9 19.4l3-3 3 3"/></g>
+  </symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24">
+    <path d="M12 3c.6 3.4 4.6 5.4 4.6 9.8a4.6 4.6 0 0 1-9.2 0c0-1.9.8-3.3 1.9-4.3.2 1.4.9 2.2 1.9 2.5C10.9 8.4 10.7 5.6 12 3z"/>
+  </symbol>
+</svg>
+
+<main class="page">
+  <header>
+    <h1>Расчёт топлива</h1>
+    <p class="sub">Норма на груженую машину и литры на пройденные километры.</p>
+  </header>
+
+  <section class="card" aria-labelledby="xl">
+    <div class="xhead">
+      <span class="label" id="xl">Расход пустой машины</span>
+      <span class="unit">л/100 км</span>
+    </div>
+    <div class="xcells">
+      <div class="xcell on" id="cellSummer">
+        <button type="button" class="xsel" id="selSummer" aria-pressed="true">
+          <svg class="ico sun" aria-hidden="true"><use href="#i-sun"/></svg>
+          <span class="xtxt"><span class="xname">Тёплый период</span><span class="xnow">сейчас</span></span>
+        </button>
+        <input class="field xin" id="xs" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="19,75" aria-label="Расход пустой машины в тёплый период, литров на 100 км">
+      </div>
+      <div class="xcell" id="cellWinter">
+        <button type="button" class="xsel" id="selWinter" aria-pressed="false">
+          <svg class="ico snow" aria-hidden="true"><use href="#i-snow"/></svg>
+          <span class="xtxt"><span class="xname">Холодный период</span><span class="xnow">сейчас</span></span>
+        </button>
+        <input class="field xin" id="xw" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="0" aria-label="Расход пустой машины в холодный период, литров на 100 км">
+      </div>
+    </div>
+    <p class="hint" id="xhint" role="status" hidden></p>
+    <p class="xcap">Нажми на период: новые строки будут считаться по его расходу.</p>
+    <div class="web" id="web" hidden>
+      <button type="button" class="wtog" id="wtog" aria-pressed="false">
+        <svg class="ico" aria-hidden="true"><use href="#i-flame"/></svg>
+        <span>Вебасто</span>
+      </button>
+      <div class="wbody" id="wbody" hidden>
+        <label class="wf" for="wl"><span>Расход, л в сутки</span>
+          <input class="field" id="wl" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="1,5"></label>
+        <label class="wf" for="wd"><span>Дней</span>
+          <input class="field" id="wd" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="0"></label>
+        <p class="wsum" id="wsum" hidden></p>
+      </div>
+      <p class="hint" id="whint" role="status" hidden></p>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="save">
+      <input class="field" id="vname" type="text" maxlength="30" autocomplete="off" enterkeyhint="done" placeholder="Название" aria-label="Название машины">
+      <button class="btn" id="saveVeh" type="button">Запомнить</button>
+    </div>
+  </section>
+
+  <section class="card" aria-label="Путевой лист">
+    <div class="note" id="exnote" hidden>
+      <span>Строки ниже — пример.</span>
+      <button class="btn" id="dropEx" type="button">Убрать примеры</button>
+    </div>
+    <div class="cols" aria-hidden="true">
+      <span></span><span>Км в начале</span><span>Км в конце</span><span>Масса груза</span><span></span>
+    </div>
+    <div id="rows"></div>
+    <div class="actions"><button class="btn" id="clear" type="button">Очистить лист</button></div>
+  </section>
+
+  <section class="totals" aria-labelledby="tl-label">
+    <span class="label" id="tl-label">Итого</span>
+    <div class="big"><output id="tl">—</output><span>л</span></div>
+    <dl class="stats">
+      <div><dt>Пройдено</dt><dd id="tkm">—</dd></div>
+      <div><dt>В среднем</dt><dd id="tavg">—</dd></div>
+      <div><dt>Строк в расчёте</dt><dd id="tn">0</dd></div>
+    </dl>
+    <div class="split" id="split" hidden>
+      <div id="splS"><svg class="ico" aria-hidden="true"><use href="#i-sun"/></svg><span>Тёплый период</span><span class="sv" id="spS">—</span></div>
+      <div id="splW"><svg class="ico" aria-hidden="true"><use href="#i-snow"/></svg><span>Холодный период</span><span class="sv" id="spW">—</span></div>
+      <div id="splB"><svg class="ico" aria-hidden="true"><use href="#i-flame"/></svg><span>Вебасто</span><span class="sv" id="spB">—</span></div>
+    </div>
+  </section>
+
+  <p class="foot" id="foot" hidden>Введённое остаётся на этом устройстве.</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'fuel-calc-v2';
+  var OLD_KEY = 'fuel-calc-v1';
+  var storageOk = false;
+  try { localStorage.setItem(KEY + '-t', '1'); localStorage.removeItem(KEY + '-t'); storageOk = true; } catch (e) {}
+
+  // Extra litres per 100 km for each unit of cargo mass.
+  var K = 0.4;
+
+  // One waybill. Every row has its own season (s), and the empty-truck consumption comes from that season.
+  // state.active is the season given to new rows. 'summer' is the warm period, 'winter' the cold one.
+  var state = {
+    active: 'summer',
+    xs: '19,75',
+    xw: '',
+    wOn: false,
+    wl: '',
+    wd: '',
+    vehicles: [],
+    example: true,
+    rows: [
+      { s: 'summer', y: '12', a: '125400', b: '125485' },
+      { s: 'summer', y: '8', a: '125485', b: '125625' },
+      { s: 'summer', y: '0', a: '125625', b: '125685' }
+    ]
+  };
+
+  function isBlank(s) { return String(s).trim() === ''; }
+  function cleanRows(arr, season) {
+    return arr.filter(function (r) { return r && typeof r === 'object'; })
+      .map(function (r) {
+        var row = {
+          s: r.s === 'winter' ? 'winter' : (r.s === 'summer' ? 'summer' : season),
+          y: String(r.y == null ? '' : r.y),
+          a: String(r.a == null ? '' : r.a),
+          b: String(r.b == null ? '' : r.b)
+        };
+        // Older sheets stored only the distance. Keep it as a trip from odometer 0.
+        if (isBlank(row.a) && isBlank(row.b) && r.v != null && !isBlank(r.v)) { row.a = '0'; row.b = String(r.v); }
+        return row;
+      })
+      .filter(function (r) { return !(isBlank(r.y) && isBlank(r.a) && isBlank(r.b)); });
+  }
+  function read(key) {
+    try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  }
+
+  var saved = read(KEY) || read(OLD_KEY);
+  if (saved && typeof saved === 'object') {
+    try {
+      if (saved.seasons && typeof saved.seasons === 'object') {
+        // Previous format: a separate table per season. Merge into one list.
+        var su = saved.seasons.summer, wi = saved.seasons.winter, merged = [];
+        if (su && typeof su.x === 'string') state.xs = su.x;
+        if (wi && typeof wi.x === 'string') state.xw = wi.x;
+        if (su && Array.isArray(su.rows)) merged = merged.concat(cleanRows(su.rows, 'summer'));
+        if (wi && Array.isArray(wi.rows)) merged = merged.concat(cleanRows(wi.rows, 'winter'));
+        state.rows = merged;
+        if (saved.season === 'winter') state.active = 'winter';
+      } else if (Array.isArray(saved.rows)) {
+        if (typeof saved.xs === 'string') state.xs = saved.xs;
+        else if (typeof saved.x === 'string') state.xs = saved.x;
+        if (typeof saved.xw === 'string') state.xw = saved.xw;
+        state.rows = cleanRows(saved.rows, 'summer');
+        if (saved.active === 'winter') state.active = 'winter';
+      }
+      if (Array.isArray(saved.vehicles)) {
+        state.vehicles = saved.vehicles
+          .filter(function (v) { return v && typeof v.name === 'string'; })
+          .map(function (v) {
+            return {
+              name: v.name,
+              xs: typeof v.xs === 'string' ? v.xs : (typeof v.x === 'string' ? v.x : ''),
+              xw: typeof v.xw === 'string' ? v.xw : '',
+              wl: typeof v.wl === 'string' ? v.wl : ''
+            };
+          });
+      }
+      if (saved.web && typeof saved.web === 'object') {
+        state.wOn = !!saved.web.on;
+        if (typeof saved.web.l === 'string') state.wl = saved.web.l;
+        if (typeof saved.web.d === 'string') state.wd = saved.web.d;
+      }
+      state.example = !!saved.example;
+    } catch (e) {}
+  }
+
+  function $(sel) { return document.querySelector(sel); }
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        active: state.active, xs: state.xs, xw: state.xw,
+        web: { on: state.wOn, l: state.wl, d: state.wd },
+        vehicles: state.vehicles, example: state.example, rows: state.rows
+      }));
+    } catch (e) {}
+  }
+
+  function num(s) {
+    var t = String(s).trim().replace(/\s/g, '').replace(',', '.');
+    if (!/^(\d+(\.\d*)?|\.\d+)$/.test(t)) return NaN;
+    return parseFloat(t);
+  }
+  function fmt(n, d) { return n.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+  function r2(n) { return Number(n.toFixed(2)); }
+  function xOf(season) { return season === 'winter' ? state.xw : state.xs; }
+  function same(a, b) {
+    if (isBlank(a) && isBlank(b)) return true;
+    var p = num(a), q = num(b);
+    return !isNaN(p) && p === q;
+  }
+
+  // Distance of a trip: end odometer minus start odometer.
+  // Returns null until both are entered, { bad: true } if a number is wrong or the end is below the start.
+  function distOf(row) {
+    if (isBlank(row.a) || isBlank(row.b)) return null;
+    var A = num(row.a), B = num(row.b);
+    if (isNaN(A) || isNaN(B) || B < A) return { bad: true };
+    return { v: r2(B - A) };
+  }
+
+  // Litres per km for the loaded truck: z = (X + Y*K) / 100, litres for the trip: m = z * distance.
+  // X is the empty-truck consumption of the row's season. Blank mass counts as an empty truck.
+  function calcRow(row) {
+    var X = num(xOf(row.s)), d = distOf(row);
+    if (isNaN(X) || !d) return null;
+    var Y = isBlank(row.y) ? 0 : num(row.y);
+    if (d.bad || isNaN(Y)) return { bad: true };
+    var z = (X + Y * K) / 100;
+    return { z: z, m: r2(z * d.v), v: d.v };
+  }
+
+  var rowsEl = $('#rows');
+  var xsEl = $('#xs'), xwEl = $('#xw');
+
+  function paintSeason(el, row) {
+    var w = row.s === 'winter';
+    var b = el.querySelector('.sea');
+    b.className = 'sea ' + (w ? 'winter' : 'summer');
+    b.querySelector('use').setAttribute('href', w ? '#i-snow' : '#i-sun');
+    var lab = w ? 'Холодный период. Нажми, чтобы сменить на тёплый.' : 'Тёплый период. Нажми, чтобы сменить на холодный.';
+    b.setAttribute('aria-label', lab);
+    b.title = lab;
+  }
+
+  function paintRow(el, row) {
+    var r = calcRow(row), d = distOf(row);
+    var m = el.querySelector('.m'), z = el.querySelector('.z'), dEl = el.querySelector('.dist');
+    el.classList.toggle('empty', isBlank(row.y) && isBlank(row.a) && isBlank(row.b));
+    dEl.classList.remove('bad');
+    if (!d) dEl.textContent = '';
+    else if (d.bad) {
+      dEl.textContent = num(row.a) > num(row.b) ? 'конец меньше начала' : 'проверь числа';
+      dEl.classList.add('bad');
+    } else dEl.textContent = d.v.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' км';
+    if (!r) { m.textContent = '—'; z.textContent = ''; z.classList.remove('bad'); }
+    else if (r.bad) { m.textContent = '?'; z.textContent = (d && d.bad) ? '' : 'проверь числа'; z.classList.add('bad'); }
+    else { m.textContent = fmt(r.m, 2); z.textContent = fmt(r.z, 4) + ' л/км'; z.classList.remove('bad'); }
+  }
+
+  function totals() {
+    var sum = { summer: { km: 0, l: 0, n: 0 }, winter: { km: 0, l: 0, n: 0 } };
+    state.rows.forEach(function (row) {
+      var r = calcRow(row);
+      if (r && !r.bad) { var t = sum[row.s]; t.km += r.v; t.l += r.m; t.n++; }
+    });
+    var km = sum.summer.km + sum.winter.km;
+    var drive = r2(sum.summer.l + sum.winter.l);
+    var n = sum.summer.n + sum.winter.n;
+    var wAmt = wAmount();
+    var l = r2(drive + wAmt);
+    $('#tl').textContent = (n || wAmt > 0) ? fmt(l, 2) : '—';
+    $('#tkm').textContent = n ? km.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' км' : '—';
+    // The average covers driving only; the heater is counted in the total.
+    $('#tavg').textContent = (n && km > 0) ? fmt(drive / km * 100, 2) + ' л/100 км' : '—';
+    $('#tn').textContent = String(n);
+    var showS = sum.summer.n > 0, showW = sum.winter.n > 0, showB = wAmt > 0;
+    var show = (showS && showW) || showB;
+    $('#split').hidden = !show;
+    $('#splS').hidden = !(show && showS);
+    $('#splW').hidden = !(show && showW);
+    $('#splB').hidden = !(show && showB);
+    if (show) {
+      $('#spS').textContent = fmt(r2(sum.summer.l), 2) + ' л · ' + sum.summer.km.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' км';
+      $('#spW').textContent = fmt(r2(sum.winter.l), 2) + ' л · ' + sum.winter.km.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' км';
+      $('#spB').textContent = fmt(wAmt, 2) + ' л · ' + state.wd.trim() + ' дн.';
+    }
+  }
+
+  function syncHints() {
+    var h = $('#xhint'), msg = '';
+    var names = { summer: 'тёплого периода', winter: 'холодного периода' };
+    ['summer', 'winter'].forEach(function (key) {
+      if (msg) return;
+      var val = xOf(key);
+      if (!isBlank(val) && isNaN(num(val))) { msg = 'Введи расход ' + names[key] + ' числом, например 19,75.'; return; }
+      if (!isBlank(val)) return;
+      var used = state.rows.some(function (r) { return r.s === key && !isBlank(r.b); });
+      if (key === state.active || used) msg = 'Введи расход ' + names[key] + ', чтобы считались его строки.';
+    });
+    h.textContent = msg;
+    h.hidden = !msg;
+  }
+
+  function renumber() {
+    Array.prototype.forEach.call(rowsEl.children, function (el, i) {
+      el.querySelector('.y').setAttribute('aria-label', 'Масса груза, строка ' + (i + 1));
+      el.querySelector('.a').setAttribute('aria-label', 'Километраж в начале, строка ' + (i + 1));
+      el.querySelector('.b').setAttribute('aria-label', 'Километраж в конце, строка ' + (i + 1));
+    });
+  }
+
+  function buildRow(row) {
+    var el = document.createElement('div');
+    el.className = 'row';
+    el.innerHTML =
+      '<button type="button" class="sea summer"><svg class="ico" aria-hidden="true"><use href="#i-sun"/></svg></button>' +
+      '<input class="field a" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="0">' +
+      '<input class="field b" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="0">' +
+      '<input class="field y" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="0">' +
+      '<button type="button" class="del" aria-label="Удалить строку">×</button>' +
+      '<div class="res"><span class="dist"></span><div class="resr"><output class="m" aria-live="off">—</output><span class="z"></span></div></div>';
+    var y = el.querySelector('.y'), a = el.querySelector('.a'), b = el.querySelector('.b');
+    y.value = row.y; a.value = row.a; b.value = row.b;
+    el._row = row;
+
+    // Deleting a row takes two taps: the first one arms the button, the second removes the row.
+    var delBtn = el.querySelector('.del'), delTimer = null;
+    function disarm() {
+      if (delTimer !== null) { clearTimeout(delTimer); delTimer = null; }
+      delBtn.classList.remove('armed');
+      delBtn.setAttribute('aria-label', 'Удалить строку');
+      paintRow(el, row);
+    }
+
+    function onInput() {
+      row.y = y.value; row.a = a.value; row.b = b.value;
+      if (delTimer !== null) disarm();
+      paintRow(el, row);
+      ensureTrailing();
+      totals();
+      syncHints();
+      save();
+    }
+    y.addEventListener('input', onInput);
+    a.addEventListener('input', onInput);
+    b.addEventListener('input', onInput);
+    a.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); b.focus(); } });
+    b.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); y.focus(); } });
+    y.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var next = el.nextElementSibling;
+      if (next) next.querySelector('.a').focus();
+    });
+    el.querySelector('.sea').addEventListener('click', function () {
+      if (delTimer !== null) disarm();
+      row.s = row.s === 'winter' ? 'summer' : 'winter';
+      paintSeason(el, row);
+      paintRow(el, row);
+      totals();
+      syncHints();
+      save();
+    });
+    delBtn.addEventListener('click', function () {
+      if (delTimer === null) {
+        delBtn.classList.add('armed');
+        delBtn.setAttribute('aria-label', 'Нажми ещё раз, чтобы удалить строку');
+        var zEl = el.querySelector('.z');
+        zEl.textContent = 'ещё раз';
+        zEl.classList.add('bad');
+        delTimer = setTimeout(disarm, 3000);
+        return;
+      }
+      clearTimeout(delTimer);
+      delTimer = null;
+      var idx = state.rows.indexOf(row);
+      if (idx < 0) return;
+      state.rows.splice(idx, 1);
+      el.remove();
+      ensureTrailing();
+      renumber();
+      totals();
+      syncHints();
+      save();
+    });
+    paintSeason(el, row);
+    paintRow(el, row);
+    return el;
+  }
+
+  // Keep one empty row at the bottom. It takes the season that is active now.
+  function ensureTrailing() {
+    var last = state.rows[state.rows.length - 1];
+    if (!last || !isBlank(last.y) || !isBlank(last.a) || !isBlank(last.b)) {
+      var row = { s: state.active, y: '', a: '', b: '' };
+      state.rows.push(row);
+      rowsEl.appendChild(buildRow(row));
+      renumber();
+    }
+  }
+
+  function rebuildRows() {
+    rowsEl.textContent = '';
+    state.rows.forEach(function (row) { rowsEl.appendChild(buildRow(row)); });
+    ensureTrailing();
+    renumber();
+    totals();
+  }
+
+  function paintAll() {
+    Array.prototype.forEach.call(rowsEl.children, function (el) { paintRow(el, el._row); });
+    totals();
+  }
+
+  function syncNote() { $('#exnote').hidden = !state.example; }
+
+  // Active season: the one new rows are counted by.
+  function syncCells() {
+    var w = state.active === 'winter';
+    $('#cellSummer').classList.toggle('on', !w);
+    $('#cellWinter').classList.toggle('on', w);
+    $('#selSummer').setAttribute('aria-pressed', String(!w));
+    $('#selWinter').setAttribute('aria-pressed', String(w));
+  }
+  function setActive(season) {
+    state.active = season;
+    var last = state.rows[state.rows.length - 1];
+    if (last && isBlank(last.y) && isBlank(last.a) && isBlank(last.b)) {
+      last.s = season;
+      var el = rowsEl.lastElementChild;
+      if (el && el._row === last) { paintSeason(el, last); paintRow(el, last); }
+    }
+    syncCells();
+    syncWeb();
+    syncHints();
+    save();
+    var inp = season === 'winter' ? xwEl : xsEl;
+    if (isBlank(inp.value)) inp.focus();
+  }
+  $('#selSummer').addEventListener('click', function () { setActive('summer'); });
+  $('#selWinter').addEventListener('click', function () { setActive('winter'); });
+
+  function afterX() {
+    syncHints();
+    paintAll();
+    renderChips();
+    save();
+  }
+  xsEl.addEventListener('input', function () { state.xs = xsEl.value; afterX(); });
+  xwEl.addEventListener('input', function () { state.xw = xwEl.value; afterX(); });
+
+  // Webasto: an extra heater for the cold period. It is off until switched on, and adds days x litres per day to the total.
+  var wlEl = $('#wl'), wdEl = $('#wd');
+  function wAmount() {
+    if (!state.wOn) return 0;
+    var l = num(state.wl), d = num(state.wd);
+    if (isNaN(l) || isNaN(d)) return 0;
+    return r2(l * d);
+  }
+  function syncWeb() {
+    $('#web').hidden = !(state.active === 'winter' || state.wOn);
+    $('#wtog').setAttribute('aria-pressed', String(state.wOn));
+    $('#wbody').hidden = !state.wOn;
+    var amt = wAmount(), sum = $('#wsum');
+    sum.hidden = !(state.wOn && amt > 0);
+    if (!sum.hidden) sum.textContent = state.wd.trim() + ' дн. × ' + state.wl.trim() + ' л = ' + fmt(amt, 2) + ' л';
+    var bad = state.wOn && (isNaN(num(state.wl)) || isNaN(num(state.wd)));
+    var hint = $('#whint');
+    hint.textContent = bad ? 'Введи расход в сутки и число дней, например 1,5 и 3.' : '';
+    hint.hidden = !bad;
+  }
+  function onWeb() {
+    state.wl = wlEl.value;
+    state.wd = wdEl.value;
+    syncWeb();
+    totals();
+    save();
+  }
+  $('#wtog').addEventListener('click', function () {
+    state.wOn = !state.wOn;
+    syncWeb();
+    totals();
+    save();
+    if (state.wOn) (isBlank(state.wl) ? wlEl : wdEl).focus();
+  });
+  wlEl.addEventListener('input', onWeb);
+  wdEl.addEventListener('input', onWeb);
+  wlEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); wdEl.focus(); } });
+  wdEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); wdEl.blur(); } });
+
+  // Vehicles: each remembers a summer and a winter consumption, and the heater's litres per day.
+  var chipsEl = $('#chips');
+  function shown(v) { return isBlank(v) ? '—' : v; }
+
+  function renderChips() {
+    chipsEl.textContent = '';
+    if (!state.vehicles.length) {
+      var p = document.createElement('p');
+      p.className = 'chips-empty';
+      p.textContent = 'Запомни машины, чтобы переключаться между ними одним касанием.';
+      chipsEl.appendChild(p);
+      return;
+    }
+    state.vehicles.forEach(function (veh) {
+      var wrap = document.createElement('span');
+      wrap.className = 'chip' + (same(veh.xs, state.xs) && same(veh.xw, state.xw) ? ' on' : '');
+      var pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'pick';
+      pick.setAttribute('aria-label', veh.name + ', тёплый период ' + shown(veh.xs) + ', холодный период ' + shown(veh.xw) +
+        (isBlank(veh.wl) ? '' : ', вебасто ' + veh.wl + ' л в сутки'));
+      pick.appendChild(document.createTextNode(veh.name));
+      var b = document.createElement('b');
+      b.textContent = shown(veh.xs) + ' / ' + shown(veh.xw);
+      pick.appendChild(b);
+      pick.addEventListener('click', function () {
+        state.xs = veh.xs; xsEl.value = veh.xs;
+        state.xw = veh.xw; xwEl.value = veh.xw;
+        state.wl = veh.wl || ''; wlEl.value = state.wl;
+        syncWeb();
+        afterX();
+      });
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'rm';
+      rm.textContent = '×';
+      rm.setAttribute('aria-label', 'Удалить машину ' + veh.name);
+      rm.addEventListener('click', function () {
+        state.vehicles.splice(state.vehicles.indexOf(veh), 1);
+        renderChips();
+        save();
+      });
+      wrap.appendChild(pick);
+      wrap.appendChild(rm);
+      chipsEl.appendChild(wrap);
+    });
+  }
+
+  function saveVehicle() {
+    var badS = !isBlank(state.xs) && isNaN(num(state.xs));
+    var badW = !isBlank(state.xw) && isNaN(num(state.xw));
+    if ((isBlank(state.xs) && isBlank(state.xw)) || badS || badW) {
+      syncHints();
+      var h = $('#xhint');
+      if (h.hidden) { h.textContent = 'Введи хотя бы один расход, чтобы запомнить машину.'; h.hidden = false; }
+      (state.active === 'winter' ? xwEl : xsEl).focus();
+      return;
+    }
+    var nameEl = $('#vname');
+    var name = nameEl.value.trim() || ('Машина ' + (state.vehicles.length + 1));
+    var xs = state.xs.trim(), xw = state.xw.trim();
+    var wl = isNaN(num(state.wl)) ? '' : state.wl.trim();
+    var found = state.vehicles.filter(function (v) { return v.name === name; })[0];
+    if (found) {
+      found.xs = xs; found.xw = xw;
+      if (wl) found.wl = wl;
+    } else {
+      state.vehicles.push({ name: name, xs: xs, xw: xw, wl: wl });
+    }
+    nameEl.value = '';
+    renderChips();
+    save();
+  }
+  $('#saveVeh').addEventListener('click', saveVehicle);
+  $('#vname').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveVehicle(); } });
+
+  // Examples and clearing
+  function clearRows() {
+    state.rows = [];
+    state.example = false;
+    // A new waybill starts without the heater: switch it off and clear its days.
+    state.wOn = false;
+    state.wd = '';
+    wdEl.value = '';
+    syncNote();
+    rebuildRows();
+    syncWeb();
+    syncHints();
+    save();
+  }
+  $('#dropEx').addEventListener('click', clearRows);
+
+  var clearBtn = $('#clear'), clearTimer = null;
+  clearBtn.addEventListener('click', function () {
+    if (clearTimer === null) {
+      clearBtn.textContent = 'Нажми ещё раз';
+      clearTimer = setTimeout(function () { clearBtn.textContent = 'Очистить лист'; clearTimer = null; }, 3000);
+      return;
+    }
+    clearTimeout(clearTimer);
+    clearTimer = null;
+    clearBtn.textContent = 'Очистить лист';
+    clearRows();
+  });
+
+  // Start
+  xsEl.value = state.xs;
+  xwEl.value = state.xw;
+  wlEl.value = state.wl;
+  wdEl.value = state.wd;
+  $('#foot').hidden = !storageOk;
+  syncCells();
+  syncWeb();
+  syncNote();
+  renderChips();
+  rebuildRows();
+  syncHints();
+})();
+</script>
+</body>
+</html>
